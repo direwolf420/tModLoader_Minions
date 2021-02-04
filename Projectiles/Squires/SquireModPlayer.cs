@@ -14,6 +14,9 @@ using Terraria.ModLoader;
 using static Terraria.ModLoader.ModContent;
 using AmuletOfManyMinions.Items.Armor.AridArmor;
 using AmuletOfManyMinions.Items.Accessories.TechnoCharm;
+using Terraria.ModLoader.IO;
+using Terraria.ID;
+using AmuletOfManyMinions.Core.Netcode.Packets;
 
 namespace AmuletOfManyMinions.Projectiles.Squires
 {
@@ -27,6 +30,10 @@ namespace AmuletOfManyMinions.Projectiles.Squires
 		public float squireDamageMultiplierBonus;
 		public float squireDamageOnHitMultiplier;
 		internal int squireDebuffTime;
+		public bool RoyalCrownDropped { get; internal set; }
+		public bool RoyalGownDropped { get; internal set; }
+		public bool RoyalDroppedFull => RoyalCrownDropped && RoyalGownDropped;
+		public bool RoyalDroppedNone => !RoyalCrownDropped && !RoyalGownDropped;
 		internal bool royalArmorSetEquipped;
 		internal bool squireBatAccessory;
 		internal bool aridArmorSetEquipped;
@@ -37,6 +44,12 @@ namespace AmuletOfManyMinions.Projectiles.Squires
 		// shouldn't be hand-rolling key press detection but here we are
 		private bool didReleaseTap;
 		private bool didDoubleTap;
+
+		public override void Initialize()
+		{
+			RoyalCrownDropped = false;
+			RoyalGownDropped = false;
+		}
 
 		public override void ResetEffects()
 		{
@@ -52,6 +65,57 @@ namespace AmuletOfManyMinions.Projectiles.Squires
 			squireDamageOnHitMultiplier = 1;
 			squireRangeFlatBonus = 0;
 			squireDamageMultiplierBonus = 0;
+		}
+
+		public override void Load(TagCompound tag)
+		{
+			// do not refactor the strings
+			RoyalCrownDropped = tag.GetBool("RoyalCrownDropped");
+			RoyalGownDropped = tag.GetBool("RoyalGownDropped");
+		}
+
+		public override TagCompound Save()
+		{
+			// do not refactor the strings
+			return new TagCompound()
+			{
+				{"RoyalCrownDropped", RoyalCrownDropped },
+				{"RoyalGownDropped", RoyalGownDropped }
+			};
+		}
+		public override void SyncPlayer(int toWho, int fromWho, bool newPlayer)
+		{
+			// delicate matter, here the packet handles sending/broadcasting internally. Other types of packets would have a split logic based on client/server
+			new RoyalDroppedPacket(player, RoyalCrownDropped, RoyalGownDropped).Send(toWho, fromWho);
+		}
+
+		/// <summary>
+		/// <para>[SpawnRoyalArmor] Called by the server when the item spawns in non-expert mode</para>
+		/// <para>[RoyalDroppedPacket] Called by the server when player spawns it from the bag and needs a broadcast</para>
+		/// <para>[SyncPlayer] Called by the server when other players join with this player on it</para>
+		/// <para>---</para>
+		/// <para>[RoyalDroppedPacket] Called by the client when server notifies client of spawned item in non-expert mode</para>
+		/// <para>[SpawnRoyalArmor] Called by the client when player spawns it from the bag</para>
+		/// <para>[RoyalDroppedPacket] Called by the client when other players join</para>
+		/// <para>[SyncPlayer] Called by the client when player joins</para>
+		/// </summary>
+		/// <param name="crown">true if the flag should be set</param>
+		/// <param name="gown">true if the flag should be set</param>
+		/// <param name="clientWantsBroadcast">true if the client sending the packet wants the server to broadcast it</param>
+		public void SetRoyalDropped(bool crown = false, bool gown = false, bool clientWantsBroadcast = false)
+		{
+			if (RoyalDroppedFull) return;
+			if (crown) RoyalCrownDropped = true;
+			if (gown) RoyalGownDropped = true;
+
+			if (Main.netMode == NetmodeID.MultiplayerClient && clientWantsBroadcast)
+			{
+				new RoyalDroppedPacket(player, RoyalCrownDropped, RoyalGownDropped, broadcast: true).Send();
+			}
+			else if (Main.netMode == NetmodeID.Server)
+			{
+				new RoyalDroppedPacket(player, RoyalCrownDropped, RoyalGownDropped).Send();
+			}
 		}
 
 		public bool HasSquire()
